@@ -1,3 +1,4 @@
+import os
 import time
 import random
 import math
@@ -5,18 +6,20 @@ from datetime import datetime
 
 import psycopg2
 import requests
+from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 
+load_dotenv()
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "myDB",
-    "user": "postgres",
-    "password": "1234",
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": int(os.getenv("DB_PORT", "5432")),
+    "dbname": os.getenv("DB_NAME", "myDB"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD"),
 }
 
-FASTAPI_BASE_URL = "http://localhost:8000"
+FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://localhost:8000")
 INSERT_INTERVAL_SECONDS = 10
 
 
@@ -85,6 +88,38 @@ def update_charger_status(ev_charger_id, charger_status: str):
             cur.close()
         if conn:
             conn.close()
+
+
+def fetch_charger_status_from_db(ev_charger_id) -> str:
+    conn = None
+    cur = None
+
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT charger_status FROM ev_charger WHERE ev_charger_id = %s",
+            (ev_charger_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else "STANDBY"
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def generate_power_off_sensor(prev: dict) -> dict:
+    t = max(float(prev["temperature"]) - 2.5 + random.uniform(-0.2, 0.2), 22.0)
+    v = max(float(prev["voltage"]) - 3.5 + random.uniform(-0.1, 0.1), 0.0)
+    c = max(float(prev["current"]) - 1.5 + random.uniform(-0.05, 0.05), 0.0)
+    return {
+        "temperature": round(t, 2),
+        "voltage": round(v, 2),
+        "current": round(c, 2),
+    }
 
 
 def insert_sensor_log(ev_charger_id, sensor: dict):
@@ -223,6 +258,9 @@ def build_initial_sensor_by_phase(phase_name: str, charger_type: str) -> dict:
     return {"temperature": 34.0, "voltage": 223.0, "current": 0.5}
 
 
+_WAVE_WRAP = 100  # wave() 주기 계산이 유효한 최대 cycle 값
+
+
 def next_phase_state(state: dict):
     sequence = state["sequence"]
     phase_index = state["phase_index"]
@@ -235,6 +273,9 @@ def next_phase_state(state: dict):
         if phase_index < len(sequence) - 1:
             phase_index += 1
             phase_cycle = 0
+        else:
+            # 마지막 페이즈: wave()가 발산하지 않도록 cycle을 wrap
+            phase_cycle = phase_cycle % _WAVE_WRAP
 
     state["phase_index"] = phase_index
     state["phase_cycle"] = phase_cycle
@@ -305,6 +346,12 @@ def generate_sensor_by_phase(prev: dict, phase_name: str, charger_type: str, pha
         v = clamp(v + (target_v - v) * 0.22 + n(0.03), 209.0, 211.4)
         c = clamp(c + (target_c - c) * 0.24 + n(0.04), 40.8, 43.6)
 
+    elif phase_name == "power_on_restart":
+        # 전원 복구 후 standby 수준으로 서서히 복귀
+        t = clamp(t + (34.0 - t) * 0.30 + n(0.05), 22.0, 36.0)
+        v = clamp(v + (223.0 - v) * 0.35 + n(0.05), 0.0, 224.0)
+        c = clamp(c + (0.5 - c) * 0.25 + n(0.02), 0.0, 1.0)
+
     else:
         t = clamp(34.0 + wave(0.5, 8, phase_cycle) + n(0.18), 33.1, 35.1)
         v = clamp(223.0 + wave(0.35, 10, phase_cycle, 0.7) + n(0.08), 222.2, 223.8)
@@ -362,10 +409,44 @@ def main():
 
             try:
                 state = sim_state[ev_charger_id]
+                charger_type = state["charger_type"]
+
+                # 프론트/외부에서 POWER_OFF가 설정됐는지 확인
+                actual_db_status = fetch_charger_status_from_db(ev_charger_id)
+                was_power_off = state.get("power_off", False)
+                is_power_off = actual_db_status == "POWER_OFF"
+
+                if is_power_off:
+                    # 강제종료 상태: 냉각 센서 생성, 상태 덮어쓰기 금지
+                    state["power_off"] = True
+                    next_sensor = generate_power_off_sensor(state["sensor"])
+                    insert_sensor_log(ev_charger_id, next_sensor)
+                    result = trigger_prediction(ev_charger_id)
+
+                    ai_status = result.get("ai_status") or result.get("status")
+                    print(
+                        f"{ev_charger_id} | POWER_OFF (냉각 중) | "
+                        f"T={next_sensor['temperature']}℃ "
+                        f"V={next_sensor['voltage']}V "
+                        f"I={next_sensor['current']}A | "
+                        f"AI={ai_status}"
+                    )
+                    state["sensor"] = next_sensor
+                    sim_state[ev_charger_id] = state
+                    continue
+
+                # POWER_OFF → 정상 복귀 시 재시작 시퀀스 주입
+                if was_power_off:
+                    state["power_off"] = False
+                    restart_seq = [{"name": "power_on_restart", "cycles": 10, "status": "STANDBY"}]
+                    state["sequence"] = restart_seq + build_phase_sequence(state["scenario"])
+                    state["phase_index"] = 0
+                    state["phase_cycle"] = 0
+                    print(f"{ev_charger_id} | POWER_ON - 재시작 (standby 복귀 중)")
+
                 phase = get_current_phase(state)
                 phase_name = phase["name"]
                 charger_status = phase["status"]
-                charger_type = state["charger_type"]
 
                 update_charger_status(ev_charger_id, charger_status)
 

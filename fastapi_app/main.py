@@ -6,8 +6,11 @@ import joblib
 import numpy as np
 import pandas as pd
 import psycopg2
+from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
+
+load_dotenv()
 
 from EV_data import add_time_series_features
 from LightGBM_train_ttr import InputFeatures, diagnose
@@ -36,11 +39,11 @@ app.add_middleware(
 # 2. DB 설정
 # =========================================================
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "myDB",
-    "user": "postgres",
-    "password": "1234",
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": int(os.getenv("DB_PORT", "5432")),
+    "dbname": os.getenv("DB_NAME", "myDB"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD"),
 }
 
 
