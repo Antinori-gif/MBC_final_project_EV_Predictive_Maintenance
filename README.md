@@ -12,9 +12,9 @@ DB_NAME=myDB
 DB_USER=postgres
 DB_PASSWORD=1234
 
--- 저장 되면 python파일은 .env파일에 있는 DB정보로 연결됩니다
-
 FASTAPI_BASE_URL=http://localhost:8003
+
+-- 저장 되면 python파일은 .env파일에 있는 DB정보로 연결됩니다
 
 2. 작동방법
 파일 경로 fast_app으로 설정 ( cd fast* )
