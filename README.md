@@ -16,11 +16,16 @@ DB_PASSWORD=1234
 
 FASTAPI_BASE_URL=http://localhost:8003
 
--- 저장 되면 python파일은 .env파일에 있는 DB정보로 연결됩니다
+-- 저장 되면 python파일은 .env파일에 있는 DB정보로 연결됩니다    
 
 2. 작동방법
 파일 경로 fast_app으로 설정 ( cd fast* )
-fastapi 실행 명령어 : uvicorn main:app --reload --port 8003
-sensor_simulator.py : python sensor_simulator.py
-
+fastapi 실행 명령어
+```text
+uvicorn main:app --reload --port 8003
+```
+sensor_simulator 실행 명령어
+```text
+python sensor_simulator.py
+```
 시뮬레이터가 센서 데이터를 생성 할 때마다, 충전기 현황 및 그래프, 예지보전이 갱신
