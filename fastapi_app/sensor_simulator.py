@@ -172,23 +172,33 @@ def trigger_prediction(ev_charger_id):
 def get_scenario(ev_charger_id) -> str:
     ev_charger_id = str(ev_charger_id).strip()
 
-    normal_ids = {
+    # A: 충전 정상 (8대)
+    charging_ids = {
         "1F-D-08", "1F-D-09", "1F-D-10",
         "2F-D-08", "2F-D-09", "2F-D-10",
-        "3F-D-08", "3F-D-09", "3F-D-10",
-        "4F-D-08", "4F-D-09", "4F-D-10",
-    }  # 12대 정상 유지
+        "3F-D-08", "3F-D-09",
+    }
 
+    # D: 항상 대기중 (4대)
+    standby_ids = {
+        "3F-D-10",
+        "4F-D-08", "4F-D-09", "4F-D-10",
+    }
+
+    # B: 점검 도달 (2대)
     check_ids = {
         "5F-D-08", "5F-D-09",
-    }  # 2대 정상 -> 점검
+    }
 
+    # C: 위험 도달 (1대)
     risk_ids = {
         "5F-D-10",
-    }  # 1대 정상 -> 점검 -> 위험
+    }
 
-    if ev_charger_id in normal_ids:
+    if ev_charger_id in charging_ids:
         return "A"
+    if ev_charger_id in standby_ids:
+        return "D"
     if ev_charger_id in check_ids:
         return "B"
     if ev_charger_id in risk_ids:
@@ -198,36 +208,45 @@ def get_scenario(ev_charger_id) -> str:
 
 
 def build_phase_sequence(scenario: str):
+    # A: 충전 정상 — 약 6분 후 충전중 진입, 이후 무한 유지
     if scenario == "A":
         return [
-            {"name": "standby_normal", "cycles": 12, "status": "STANDBY"},
-            {"name": "charging_ramp", "cycles": 10, "status": "CHARGING"},
+            {"name": "standby_normal", "cycles": 3, "status": "STANDBY"},
+            {"name": "charging_ramp", "cycles": 5, "status": "CHARGING"},
             {"name": "charging_normal", "cycles": 999999, "status": "CHARGING"},
         ]
 
+    # D: 항상 대기중 — 충전하지 않음
+    if scenario == "D":
+        return [
+            {"name": "standby_normal", "cycles": 999999, "status": "STANDBY"},
+        ]
+
+    # B: 점검 도달 — 약 17분(22사이클) 후 check_hold 진입
     if scenario == "B":
         return [
-            {"name": "standby_normal", "cycles": 12, "status": "STANDBY"},
-            {"name": "charging_ramp", "cycles": 10, "status": "CHARGING"},
-            {"name": "charging_normal", "cycles": 18, "status": "CHARGING"},
-            {"name": "rising_to_check", "cycles": 10, "status": "CHARGING"},
+            {"name": "standby_normal", "cycles": 3, "status": "STANDBY"},
+            {"name": "charging_ramp", "cycles": 5, "status": "CHARGING"},
+            {"name": "charging_normal", "cycles": 9, "status": "CHARGING"},
+            {"name": "rising_to_check", "cycles": 5, "status": "CHARGING"},
             {"name": "check_hold", "cycles": 999999, "status": "CHARGING"},
         ]
 
+    # C: 위험 도달 — 약 26분(33사이클) 후 risk_hold 진입
     if scenario == "C":
         return [
-            {"name": "standby_normal", "cycles": 12, "status": "STANDBY"},
-            {"name": "charging_ramp", "cycles": 10, "status": "CHARGING"},
-            {"name": "charging_normal", "cycles": 18, "status": "CHARGING"},
-            {"name": "rising_to_check", "cycles": 10, "status": "CHARGING"},
-            {"name": "check_hold", "cycles": 12, "status": "CHARGING"},
-            {"name": "rising_to_risk", "cycles": 10, "status": "CHARGING"},
+            {"name": "standby_normal", "cycles": 3, "status": "STANDBY"},
+            {"name": "charging_ramp", "cycles": 5, "status": "CHARGING"},
+            {"name": "charging_normal", "cycles": 9, "status": "CHARGING"},
+            {"name": "rising_to_check", "cycles": 5, "status": "CHARGING"},
+            {"name": "check_hold", "cycles": 6, "status": "CHARGING"},
+            {"name": "rising_to_risk", "cycles": 5, "status": "CHARGING"},
             {"name": "risk_hold", "cycles": 999999, "status": "CHARGING"},
         ]
 
     return [
-        {"name": "standby_normal", "cycles": 12, "status": "STANDBY"},
-        {"name": "charging_ramp", "cycles": 10, "status": "CHARGING"},
+        {"name": "standby_normal", "cycles": 3, "status": "STANDBY"},
+        {"name": "charging_ramp", "cycles": 5, "status": "CHARGING"},
         {"name": "charging_normal", "cycles": 999999, "status": "CHARGING"},
     ]
 
@@ -416,19 +435,15 @@ def main():
                 is_power_off = actual_db_status == "POWER_OFF"
 
                 if is_power_off:
-                    # 강제종료 상태: 냉각 센서 생성, 상태 덮어쓰기 금지
+                    # 강제종료 상태: 냉각 센서 삽입만, AI 재예측 금지 (상태 고정)
                     state["power_off"] = True
                     next_sensor = generate_power_off_sensor(state["sensor"])
                     insert_sensor_log(ev_charger_id, next_sensor)
-                    result = trigger_prediction(ev_charger_id)
-
-                    ai_status = result.get("ai_status") or result.get("status")
                     print(
                         f"{ev_charger_id} | POWER_OFF (냉각 중) | "
                         f"T={next_sensor['temperature']}℃ "
                         f"V={next_sensor['voltage']}V "
-                        f"I={next_sensor['current']}A | "
-                        f"AI={ai_status}"
+                        f"I={next_sensor['current']}A | AI 상태 고정"
                     )
                     state["sensor"] = next_sensor
                     sim_state[ev_charger_id] = state

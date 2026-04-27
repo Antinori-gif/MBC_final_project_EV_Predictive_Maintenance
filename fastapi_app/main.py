@@ -510,11 +510,14 @@ def fetch_prediction_input_from_db(charger_id: str, limit: int = 14) -> tuple[li
 
                     CASE
                         WHEN c.charger_status = 'CHARGING' AND cl.start_time IS NOT NULL THEN
-                            COALESCE(
-                                EXTRACT(EPOCH FROM (
-                                    COALESCE(cl.end_time, s.measured_time) - cl.start_time
-                                )) / 3600.0,
-                                0
+                            LEAST(
+                                COALESCE(
+                                    EXTRACT(EPOCH FROM (
+                                        COALESCE(cl.end_time, s.measured_time) - cl.start_time
+                                    )) / 3600.0,
+                                    0
+                                ),
+                                12.0
                             )
                         ELSE 0
                     END AS "Usage_Hrs",

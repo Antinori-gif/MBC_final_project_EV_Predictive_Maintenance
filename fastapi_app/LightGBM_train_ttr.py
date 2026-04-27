@@ -32,8 +32,8 @@ class TTRConfig:
     health_warning_below: float = 60.0
     health_risk_below: float = 35.0
 
-    usage_warning_hours: float = 8.0
-    usage_risk_hours: float = 12.0
+    usage_warning_hours: float = 14.0
+    usage_risk_hours: float = 17.0
 
     # 최대 TTR: 14일 = 336시간
     max_ttr_hours: float = 336.0
@@ -242,9 +242,9 @@ def calculate_fault_prob_7d(risk_score: float, state: str) -> float:
         return 0.0
 
     if state == "점검":
-        return clamp(0.01 + risk_score * 0.04, 0.01, 0.05)
+        return clamp(0.05 + risk_score * 0.05, 0.05, 0.10)
 
-    return clamp(0.05 + risk_score * 0.10, 0.05, 0.15)
+    return clamp(0.10 + risk_score * 0.10, 0.10, 0.20)
 
 # =========================================================
 # 판단 사유 생성
