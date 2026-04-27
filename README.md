@@ -6,11 +6,13 @@
 .env 파일 생성 후 
 DB 부분을 본인 DB정보 입력하기
 
+```text
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=myDB
 DB_USER=postgres
 DB_PASSWORD=1234
+```
 
 FASTAPI_BASE_URL=http://localhost:8003
 
