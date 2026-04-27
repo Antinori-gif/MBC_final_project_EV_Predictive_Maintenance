@@ -290,15 +290,8 @@ def build_response(
     alarm = pred_class in [1, 2]
 
     raw_fault_prob = ttr_result.get("fault_prob_7d")
-    raw_fault_prob = float(raw_fault_prob) if raw_fault_prob is not None else 0.0
-
-    # 모델 상태는 그대로 쓰고, 확률만 상태에 맞게 보정
-    if ai_status == "NORMAL":
-        fault_prob_7d = max(0.0, min(raw_fault_prob, 0.29))
-    elif ai_status == "CHECK":
-        fault_prob_7d = max(0.30, min(raw_fault_prob, 0.49))
-    else:  # RISK
-        fault_prob_7d = max(0.50, min(raw_fault_prob, 1.0))
+    fault_prob_7d = float(raw_fault_prob) if raw_fault_prob is not None else 0.0
+    ttr_probs = ttr_result.get("probabilities") or {}
 
     if current_charger_status == "POWER_OFF":
         device_status = "위험 감지로 인한 강제 중지"
@@ -318,9 +311,9 @@ def build_response(
         "device_status": device_status,
         "inspection_requested": inspection_requested,
         "fault_prob_7d": fault_prob_7d,
-        "prob_normal": float(status_probs[0]),
-        "prob_check": float(status_probs[1]),
-        "prob_risk": float(status_probs[2]),
+        "prob_normal": ttr_probs.get("normal", float(status_probs[0])),
+        "prob_check": ttr_probs.get("inspect", float(status_probs[1])),
+        "prob_risk": ttr_probs.get("risk", float(status_probs[2])),
         "temperature": float(latest["Peak_T"]) if pd.notna(latest["Peak_T"]) else None,
         "voltage": float(latest["Voltage"]) if pd.notna(latest["Voltage"]) else None,
         "current": float(latest["Current"]) if pd.notna(latest["Current"]) else None,
@@ -353,8 +346,11 @@ def run_prediction_from_history(
     status_probs = status_model.predict_proba(X_status)[0]
     pred_class = int(np.argmax(status_probs))
     
+    peak_t_avg = float(latest.get("Peak_T_ma14", latest["Peak_T"]))
+    estimated_health = max(0.0, min(100.0, 100.0 - max(0.0, peak_t_avg - 40.0) * 1.4))
+
     ttr_features = InputFeatures(
-        health=float(latest["Health"]),
+        health=estimated_health,
         peak_temp=float(latest["Peak_T"]),
         usage_hours=float(latest["Usage_Hrs"]),
         voltage=float(latest["Voltage"]),

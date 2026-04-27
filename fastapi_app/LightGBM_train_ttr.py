@@ -87,12 +87,11 @@ class DiagnosisResult:
             "risk_score": round(self.risk_score, 4),
             "reason": self.reason,
             "fault_prob_7d": round(self.fault_prob_7d, 4) if self.fault_prob_7d is not None else None,
+            "probabilities": self.probabilities,
         }
 
-        # 점검일 때만 고장확률 / TTR / 상태확률 노출
         if self.state == "점검":
             result["ttr_hours"] = round(self.ttr_hours, 1) if self.ttr_hours is not None else None
-            result["probabilities"] = self.probabilities
 
         return result
 
@@ -234,17 +233,18 @@ def calculate_ttr_hours(risk_score: float, config: TTRConfig) -> float:
 
 def calculate_fault_prob_7d(risk_score: float, state: str) -> float:
     """
-    상태와 모순되지 않도록 같은 risk_score 기반으로 계산
+    환경부/운영사 기준 구간으로 산출 (프론트에서 ×100으로 % 표기)
+    정상: 미표기(0.0), 점검: 1%~5%, 위험: 5%~15%
     """
     risk_score = clamp(risk_score, 0.0, 1.0)
 
     if state == "정상":
-        return clamp(risk_score * 0.30, 0.0, 0.29)
+        return 0.0
 
     if state == "점검":
-        return clamp(0.30 + (risk_score * 0.40), 0.30, 0.69)
+        return clamp(0.01 + risk_score * 0.04, 0.01, 0.05)
 
-    return clamp(0.70 + (risk_score * 0.30), 0.70, 1.0)
+    return clamp(0.05 + risk_score * 0.10, 0.05, 0.15)
 
 # =========================================================
 # 판단 사유 생성
@@ -376,7 +376,7 @@ def diagnose(features: InputFeatures, config: Optional[TTRConfig] = None) -> Dia
         reason=reason,
         ttr_hours=None,
         fault_prob_7d=fault_prob_7d,
-        probabilities=None,
+        probabilities=probs.to_dict(),
     )
 
 # =========================================================
